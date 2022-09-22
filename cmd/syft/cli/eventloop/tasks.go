@@ -41,11 +41,14 @@ func Tasks(app *config.Application) ([]Task, error) {
 }
 
 func generateCatalogPackagesTask(app *config.Application) (Task, error) {
+
 	if !app.Package.Cataloger.Enabled {
 		return nil, nil
 	}
+	//fmt.Println("generateCatalogPackagesTask")
 
 	task := func(results *sbom.Artifacts, src *source.Source) ([]artifact.Relationship, error) {
+		//start := time.Now()
 		packageCatalog, relationships, theDistro, err := syft.CatalogPackages(src, app.ToCatalogerConfig())
 		if err != nil {
 			return nil, err
@@ -53,7 +56,7 @@ func generateCatalogPackagesTask(app *config.Application) (Task, error) {
 
 		results.PackageCatalog = packageCatalog
 		results.LinuxDistribution = theDistro
-
+		//fmt.Println("DONE generateCatalogPackagesTask", time.Since(start))
 		return relationships, nil
 	}
 
@@ -61,10 +64,11 @@ func generateCatalogPackagesTask(app *config.Application) (Task, error) {
 }
 
 func generateCatalogFileMetadataTask(app *config.Application) (Task, error) {
+
 	if !app.FileMetadata.Cataloger.Enabled {
 		return nil, nil
 	}
-
+	fmt.Println("generateCatalogFileMetadataTask")
 	metadataCataloger := file.NewMetadataCataloger()
 
 	task := func(results *sbom.Artifacts, src *source.Source) ([]artifact.Relationship, error) {
@@ -85,10 +89,11 @@ func generateCatalogFileMetadataTask(app *config.Application) (Task, error) {
 }
 
 func generateCatalogFileDigestsTask(app *config.Application) (Task, error) {
+
 	if !app.FileMetadata.Cataloger.Enabled {
 		return nil, nil
 	}
-
+	fmt.Println("generateCatalogFileDigestsTask")
 	supportedHashAlgorithms := make(map[string]crypto.Hash)
 	for _, h := range []crypto.Hash{
 		crypto.MD5,
@@ -131,10 +136,11 @@ func generateCatalogFileDigestsTask(app *config.Application) (Task, error) {
 }
 
 func generateCatalogSecretsTask(app *config.Application) (Task, error) {
+
 	if !app.Secrets.Cataloger.Enabled {
 		return nil, nil
 	}
-
+	fmt.Println("generateCatalogSecretsTask")
 	patterns, err := file.GenerateSearchPatterns(file.DefaultSecretsPatterns, app.Secrets.AdditionalPatterns, app.Secrets.ExcludePatternNames)
 	if err != nil {
 		return nil, err
@@ -163,10 +169,11 @@ func generateCatalogSecretsTask(app *config.Application) (Task, error) {
 }
 
 func generateCatalogFileClassificationsTask(app *config.Application) (Task, error) {
+
 	if !app.FileClassification.Cataloger.Enabled {
 		return nil, nil
 	}
-
+	fmt.Println("generateCatalogFileClassificationsTask")
 	// TODO: in the future we could expose out the classifiers via configuration
 	classifierCataloger, err := file.NewClassificationCataloger(file.DefaultClassifiers)
 	if err != nil {
@@ -191,10 +198,11 @@ func generateCatalogFileClassificationsTask(app *config.Application) (Task, erro
 }
 
 func generateCatalogContentsTask(app *config.Application) (Task, error) {
+
 	if !app.FileContents.Cataloger.Enabled {
 		return nil, nil
 	}
-
+	fmt.Println("generateCatalogContentsTask")
 	contentsCataloger, err := file.NewContentsCataloger(app.FileContents.Globs, app.FileContents.SkipFilesAboveSize)
 	if err != nil {
 		return nil, err

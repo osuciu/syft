@@ -66,10 +66,7 @@ func Packages(v *viper.Viper, app *config.Application, ro *options.RootOptions, 
 		},
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if app.CheckForAppUpdate {
-				checkForApplicationUpdate()
-			}
+		RunE: func(cmd *cobra.Command, args []string) error {			
 			return packages.Run(cmd.Context(), app, args)
 		},
 	}
@@ -79,5 +76,6 @@ func Packages(v *viper.Viper, app *config.Application, ro *options.RootOptions, 
 		log.Fatal(err)
 	}
 
+	//fmt.Println("Hello3")
 	return cmd
 }

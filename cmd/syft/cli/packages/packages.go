@@ -1,10 +1,12 @@
 package packages
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/wagoodman/go-partybus"
 
@@ -16,7 +18,8 @@ import (
 	"github.com/anchore/syft/internal/bus"
 	"github.com/anchore/syft/internal/config"
 	"github.com/anchore/syft/internal/log"
-	"github.com/anchore/syft/internal/ui"
+
+	//"github.com/anchore/syft/internal/ui"
 	"github.com/anchore/syft/internal/version"
 	"github.com/anchore/syft/syft"
 	"github.com/anchore/syft/syft/artifact"
@@ -43,30 +46,96 @@ func Run(ctx context.Context, app *config.Application, args []string) error {
 		}
 	}()
 
-	// could be an image or a directory, with or without a scheme
-	userInput := args[0]
-	si, err := source.ParseInput(userInput, app.Platform, true)
+	readFile, err := os.Open(args[0])
 	if err != nil {
-		return fmt.Errorf("could not generate source input for packages command: %w", err)
+		fmt.Printf("error opening file: %v\n", err)
+		os.Exit(1)
 	}
 
-	eventBus := partybus.NewBus()
-	stereoscope.SetBus(eventBus)
-	syft.SetBus(eventBus)
-	subscription := eventBus.Subscribe()
+	fileScanner := bufio.NewScanner(readFile)
 
-	return eventloop.EventLoop(
-		execWorker(app, *si, writer),
-		eventloop.SetupSignals(),
-		subscription,
-		stereoscope.Cleanup,
-		ui.Select(options.IsVerbose(app), app.Quiet)...,
-	)
+	fileScanner.Split(bufio.ScanLines)
+
+	for fileScanner.Scan() {
+		//fmt.Println(fileScanner.Text())
+		userInput := fileScanner.Text()
+		// could be an image or a directory, with or without a scheme
+		//for _, userInput := range strings.Split(args[0], ",") {
+		//userInput := args[0]
+		log.Debugf(">>>>", userInput)
+		//fmt.Println(userInput)
+
+		si, err := source.ParseInput(userInput, app.Platform, true)
+
+		if err != nil {
+			return fmt.Errorf("could not generate source input for packages command: %w", err)
+		}
+
+		eventBus := partybus.NewBus()
+		stereoscope.SetBus(eventBus)
+		syft.SetBus(eventBus)
+		//subscription := eventBus.Subscribe()
+		//fmt.Println(si, err)
+		//os.Exit(0)
+		start := time.Now()
+		/*
+			el := eventloop.EventLoop(
+				execWorker(app, *si, writer),
+				eventloop.SetupSignals(),
+				subscription,
+				stereoscope.Cleanup,
+				ui.Select(options.IsVerbose(app), app.Quiet)...,
+			)
+
+		*/
+		execWorker2(app, *si, writer)
+		log.Debugf("ALL: ", time.Since(start))
+	}
+	//execWorker2(app, *si, writer)
+	//ui.Select(options.IsVerbose(app), app.Quiet)
+
+	//return el
+	return nil
+}
+
+func execWorker2(app *config.Application, si source.Input, writer sbom.Writer) *sbom.SBOM {
+	//start := time.Now()
+	errs := make(chan error)
+	src, cleanup, err := source.New2(si, app.Registry.ToOptions(), app.Exclusions)
+	//fmt.Println("NEW SOURCE: ", time.Since(start))
+	start := time.Now()
+	if cleanup != nil {
+		defer cleanup()
+	}
+	if err != nil {
+		errs <- fmt.Errorf("failed to construct source from user input %q: %w", si.UserInput, err)
+		return nil
+	}
+
+	s, err := GenerateSBOM(src, errs, app)
+	log.Debugf("SBOM: ", time.Since(start))
+	//fmt.Infof()
+	if err != nil {
+		errs <- err
+		return nil
+	}
+
+	//fmt.Println(s)
+	/*
+		bus.Publish(partybus.Event{
+			Type:  event.Exit,
+			Value: func() error { return writer.Write(*s) },
+		})*/
+	//fmt.Println(reflect.TypeOf(writer))
+	//fmt.Println(">>>\n", writer.Write(*s), "<<<\n")
+	writer.Write(*s)
+	return s
 }
 
 func execWorker(app *config.Application, si source.Input, writer sbom.Writer) <-chan error {
 	errs := make(chan error)
 	go func() {
+
 		defer close(errs)
 
 		src, cleanup, err := source.New(si, app.Registry.ToOptions(), app.Exclusions)
@@ -77,8 +146,10 @@ func execWorker(app *config.Application, si source.Input, writer sbom.Writer) <-
 			errs <- fmt.Errorf("failed to construct source from user input %q: %w", si.UserInput, err)
 			return
 		}
-
+		start := time.Now()
 		s, err := GenerateSBOM(src, errs, app)
+		//fmt.Println(src.Artifacts)
+		log.Debugf("\n\n>>>>>>>", time.Since(start))
 		if err != nil {
 			errs <- err
 			return
@@ -105,10 +176,11 @@ func execWorker(app *config.Application, si source.Input, writer sbom.Writer) <-
 
 func GenerateSBOM(src *source.Source, errs chan error, app *config.Application) (*sbom.SBOM, error) {
 	tasks, err := eventloop.Tasks(app)
+
 	if err != nil {
 		return nil, err
 	}
-
+	//start := time.Now()
 	s := sbom.SBOM{
 		Source: src.Metadata,
 		Descriptor: sbom.Descriptor{
@@ -117,26 +189,37 @@ func GenerateSBOM(src *source.Source, errs chan error, app *config.Application) 
 			Configuration: app,
 		},
 	}
-
+	//fmt.Println("BUILD RELATIONSHIPS",time.Since(start))
 	buildRelationships(&s, src, tasks, errs)
+	//fmt.Println(reflect.TypeOf(s.Artifacts))
+	//fmt.Println(s.Artifacts.FileMetadata)
 
+	//fmt.Println("DONE BUILD RELATIONSHIPS",time.Since(start))
 	return &s, nil
 }
 
 func buildRelationships(s *sbom.SBOM, src *source.Source, tasks []eventloop.Task, errs chan error) {
 	var relationships []<-chan artifact.Relationship
+	//start := time.Now()
 	for _, task := range tasks {
+		//fmt.Println(task, reflect.TypeOf(task))
 		c := make(chan artifact.Relationship)
 		relationships = append(relationships, c)
 		go eventloop.RunTask(task, &s.Artifacts, src, c, errs)
 	}
-
 	s.Relationships = append(s.Relationships, MergeRelationships(relationships...)...)
+	//fmt.Println("DONE TASKS",time.Since(start))
+	/*
+		s.Relationships = append(s.Relationships, MergeRelationships(relationships...)...)
+		fmt.Println("DONE RELATIONS",time.Since(start))
+		fmt.Println(s.Relationships)*/
 }
 
 func MergeRelationships(cs ...<-chan artifact.Relationship) (relationships []artifact.Relationship) {
 	for _, c := range cs {
+		//fmt.Println(reflect.TypeOf(c), c)
 		for n := range c {
+			//fmt.Println(reflect.TypeOf(n), n)
 			relationships = append(relationships, n)
 		}
 	}

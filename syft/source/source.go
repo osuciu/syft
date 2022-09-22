@@ -6,6 +6,7 @@ within this package.
 package source
 
 import (
+	//"io/ioutil"
 	"context"
 	"fmt"
 	"os"
@@ -94,6 +95,18 @@ func NewFromRegistry(in Input, registryOptions *image.RegistryOptions, exclusion
 	if source != nil {
 		source.Exclusions = exclusions
 	}
+	return source, cleanupFn, err
+}
+
+// New produces a Source based on userInput like dir: or image:tag
+func New2(in Input, registryOptions *image.RegistryOptions, exclusions []string) (*Source, func(), error) {
+	var err error
+	fs := afero.NewOsFs()
+	var source *Source
+	cleanupFn := func() {}
+
+	source, cleanupFn, err = generateFileSource2(fs, in.Location)
+
 	return source, cleanupFn, err
 }
 
@@ -221,6 +234,12 @@ func generateDirectorySource(fs afero.Fs, location string) (*Source, func(), err
 	return &s, func() {}, nil
 }
 
+func generateFileSource2(fs afero.Fs, location string) (*Source, func(), error) {
+	s, cleanupFn := NewFromFile2(location)
+
+	return &s, cleanupFn, nil
+}
+
 func generateFileSource(fs afero.Fs, location string) (*Source, func(), error) {
 	fileMeta, err := fs.Stat(location)
 	if err != nil {
@@ -231,7 +250,7 @@ func generateFileSource(fs afero.Fs, location string) (*Source, func(), error) {
 		return nil, func() {}, fmt.Errorf("given path is not a directory (path=%q): %w", location, err)
 	}
 
-	s, cleanupFn := NewFromFile(location)
+	s, cleanupFn := NewFromFile2(location)
 
 	return &s, cleanupFn, nil
 }
@@ -249,6 +268,20 @@ func NewFromDirectory(path string) (Source, error) {
 }
 
 // NewFromFile creates a new source object tailored to catalog a file.
+func NewFromFile2(path string) (Source, func()) {
+	analysisPath, cleanupFn := fileAnalysisPath2(path)
+
+	return Source{
+		mutex: &sync.Mutex{},
+		Metadata: Metadata{
+			Scheme: FileScheme,
+			Path:   path,
+		},
+		path: analysisPath,
+	}, cleanupFn
+}
+
+// NewFromFile creates a new source object tailored to catalog a file.
 func NewFromFile(path string) (Source, func()) {
 	analysisPath, cleanupFn := fileAnalysisPath(path)
 
@@ -260,6 +293,47 @@ func NewFromFile(path string) (Source, func()) {
 		},
 		path: analysisPath,
 	}, cleanupFn
+}
+
+// fileAnalysisPath returns the path given, or in the case the path is an archive, the location where the archive
+// contents have been made available. A cleanup function is provided for any temp files created (if any).
+func fileAnalysisPath2(path string) (string, func()) {
+
+	// if the given file is an archive (as indicated by the file extension and not MIME type) then unarchive it and
+	// use the contents as the source. Note: this does NOT recursively unarchive contents, only the given path is
+	// unarchived.
+	//envelopedUnarchiver := archiver.NewTarGz()
+
+	//fpath, errf := os.Open(path)
+	//fmt.Println(errf)
+
+	//envelopedUnarchiver, _ := archiver.ByExtension(path)
+	//envelopedUnarchiver, erra := archiver.ByHeader(fpath) //io.ReadSeeker(fpath))
+
+	//fmt.Println(erra)
+
+	//unarchiver := envelopedUnarchiver.(archiver.Unarchiver)
+	unarchivedPath, tmpCleanup, _ := unarchiveToTmp(path, archiver.NewTarGz())
+	return unarchivedPath, tmpCleanup
+	/*
+		tempDir, _ := os.MkdirTemp("", "syft-archive-contents-")
+
+		cleanupFn := func() {
+			if err := os.RemoveAll(tempDir); err != nil {
+				log.Warnf("unable to cleanup archive tempdir: %+v", err)
+			}
+		}
+
+		archiver.Unarchive(path, tempDir)
+
+		///*
+		files, _ := ioutil.ReadDir(tempDir)
+		for _, f := range files {
+			fmt.Println(f.Name())
+		}
+		//time.Sleep(8 * time.Second)
+		//
+		return tempDir, cleanupFn */
 }
 
 // fileAnalysisPath returns the path given, or in the case the path is an archive, the location where the archive
